@@ -26,3 +26,15 @@ def run(
     if r.returncode != 0:
         raise CommandError(f"{' '.join(map(str, cmd[:4]))}... falló: {r.stderr.strip()[:500]}")
     return r.stdout
+
+
+def probe(cmd: list[str], timeout: float = 30) -> tuple[bool, str]:
+    """Como :func:`run` pero nunca lanza: devuelve ``(ok, salida o error)``. Para diagnósticos."""
+    try:
+        return True, run(cmd, timeout=timeout).strip()
+    except FileNotFoundError:
+        return False, f"'{cmd[0]}' no está instalado"
+    except subprocess.TimeoutExpired:
+        return False, f"'{cmd[0]}' no respondió en {timeout}s"
+    except CommandError as e:
+        return False, str(e)

@@ -11,15 +11,18 @@ Revisa Pull Requests de GitHub con Claude Code cuando el usuario autorizado come
 ## Instalación y uso
 ```bash
 uv sync
-cp config.example.toml ~/.config/claude-review/config.toml   # y editarlo
+uv run claude-review init --repo org/repo=~/ruta/del/clon   # crea config y estado inicial
+uv run claude-review doctor         # verifica herramientas, sesiones, config y repos
 uv run claude-review --dry-run      # imprime la revisión, no publica ni guarda estado
-uv run claude-review                # ciclo normal
+uv run claude-review                # una pasada normal (equivale a `run`)
 uv run claude-review --since 2026-11-25T10:00:00Z
 ```
-Cron cada 2 minutos:
-```
-*/2 * * * * cd /ruta/claude-reviewer-bot && uv run claude-review >> ~/.local/state/claude-review/log 2>&1
-```
+- `init` toma `allowed_user` de tu sesión de `gh` si no pasas `--allowed-user`; en una terminal
+  pregunta lo que falte. No sobrescribe un config existente (salvo `--force`) ni reinicia el estado.
+- `doctor` solo diagnostica (no instala nada) y sale con código 1 si hay algún ❌.
+- Todos los comandos aceptan `--config RUTA`.
+
+El bot se ejecuta a mano: comenta `/claude-review` en el PR y luego corre `uv run claude-review`.
 
 ## Plantilla del prompt
 La plantilla es un Markdown en `src/claude_reviewer_bot/templates/review.md`, con frontmatter
@@ -35,7 +38,11 @@ revisado: las convenciones propias de cada proyecto se aplican sin tocar el bot.
 ## Arquitectura
 | Módulo | Responsabilidad |
 |---|---|
-| `cli.py` | argumentos, lock, armado de dependencias, ciclo |
+| `cli.py` | subcomandos `run`, `doctor`, `init` (Command: tabla de handlers) |
+| `runner.py` | una pasada: lock, buscar comentarios, procesar, guardar estado |
+| `admin/checks.py` | verificaciones del entorno, cada una devuelve un `Check` con pista |
+| `admin/doctor.py` | junta los checks, imprime el reporte y el código de salida |
+| `admin/init.py` | genera el config y el estado inicial |
 | `config.py` | carga y validación del TOML (dataclasses inmutables) |
 | `state.py` | `StateStore` (Repository): JSON atómico + lock |
 | `github.py` | `GitHubClient` (Facade sobre `gh`) |
