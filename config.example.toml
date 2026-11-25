@@ -1,0 +1,21 @@
+# Copiar a ~/.config/claude-review/config.toml (o apuntar CLAUDE_REVIEW_CONFIG / --config aquí).
+
+# Único usuario de GitHub autorizado a disparar /claude-review.
+allowed_user = "tu-usuario"
+
+# Opcionales (valores por defecto):
+# max_diff_chars = 150000
+# max_files = 60
+# timeout_seconds = 900
+# max_attempts = 3
+# max_words = 700
+# model = ""                                  # vacío = modelo por defecto de Claude Code
+# template = "~/.config/claude-review/review.md"  # plantilla global propia
+# state_dir = "~/.local/state/claude-review"
+
+[repos]
+# Forma corta: repo = ruta del clon local.
+"mi-org/backend" = "~/dev/backend"
+
+# Forma larga: con plantilla específica para ese repo.
+"mi-org/frontend" = { path = "~/dev/frontend", template = "~/.config/claude-review/frontend.md" }
