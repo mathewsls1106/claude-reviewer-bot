@@ -74,6 +74,10 @@ Antes de dar un cambio por terminado debe pasar, sin excepciones:
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
 
+La CI (`.github/workflows/ci.yml`) ejecuta lo mismo en cada push a `main` y en cada PR: job `lint`
+(ruff + mypy) y job `test` (pytest en Python 3.12, 3.13 y 3.14), ambos con `uv sync --locked`, así que
+si cambias dependencias hay que commitear también `uv.lock`.
+
 ### TDD
 El proyecto se desarrolla con TDD (rojo → verde → refactor):
 1. Escribir primero los tests que fijan el contrato del cambio y comprobar que fallan.
