@@ -122,6 +122,14 @@ Un bug se corrige primero con un test que lo reproduzca.
   ni `~/.local/state` reales.
 - `shell.run` lanza `CommandError`; `shell.probe` nunca lanza y devuelve `(ok, salida)` (para diagnósticos).
 
-### Commits
-Conventional Commits en español (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`), asunto en imperativo
-y cuerpo explicando el porqué cuando no es obvio. Solo se hace commit/push cuando el usuario lo pide.
+### Commits y Pull Requests
+- Conventional Commits en español (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`), asunto en
+  imperativo y cuerpo explicando el porqué cuando no es obvio. Solo se hace commit/push cuando el usuario lo pide.
+- **Todo cambio entra a `main` por Pull Request.** `main` está protegida (también para administradores):
+  sin push directo ni force push, y para fusionar deben pasar los 4 checks de CI (`Lint (ruff + mypy)`,
+  `Tests (Python 3.12|3.13|3.14)`) con la rama al día respecto a `main` y las conversaciones resueltas.
+- Flujo: rama desde `main` con prefijo según el tipo (`feat/`, `fix/`, `refactor/`, `docs/`, `ci/`) →
+  commits → `git push -u origin <rama>` → `gh pr create` → esperar la CI verde. Fusionar solo si el
+  usuario lo pide.
+- Si se renombra un job de `ci.yml`, hay que actualizar los checks requeridos de la protección de `main`
+  (el nombre del check es el `name:` del job); si no, los PRs quedan bloqueados esperando un check que no existe.
