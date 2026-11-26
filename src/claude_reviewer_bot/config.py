@@ -8,6 +8,7 @@ from typing import Any
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config/claude-review/config.toml"
 DEFAULT_STATE_DIR = Path.home() / ".local/state/claude-review"
+MIN_POLL_INTERVAL = 60  # segundos; menos gasta cuota de la API de GitHub sin beneficio real
 
 
 class ConfigError(ValueError):
@@ -30,6 +31,7 @@ class Config:
     timeout_seconds: int = 900
     max_attempts: int = 3
     max_words: int = 700
+    poll_interval_seconds: int = 300  # pausa entre pasadas de `watch`
     model: str = ""
     template: Path | None = None  # plantilla global; None = la incluida en el paquete
     state_dir: Path = field(default=DEFAULT_STATE_DIR)
@@ -66,6 +68,8 @@ def parse_config(raw: dict[str, Any]) -> Config:
     unknown = set(raw) - known
     if unknown:
         raise ConfigError(f"claves desconocidas: {', '.join(sorted(unknown))}")
+    if raw.get("poll_interval_seconds", MIN_POLL_INTERVAL) < MIN_POLL_INTERVAL:
+        raise ConfigError(f"'poll_interval_seconds' debe ser al menos {MIN_POLL_INTERVAL}")
     for key in ("template", "state_dir"):
         if key in raw:
             raw[key] = _path(raw[key])

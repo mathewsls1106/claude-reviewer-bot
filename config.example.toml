@@ -9,6 +9,7 @@ allowed_user = "tu-usuario"
 # timeout_seconds = 900
 # max_attempts = 3
 # max_words = 700
+# poll_interval_seconds = 300               # pausa de `watch` entre pasadas (mínimo 60)
 # model = ""                                  # vacío = modelo por defecto de Claude Code
 # template = "~/.config/claude-review/review.md"  # plantilla global propia
 # state_dir = "~/.local/state/claude-review"

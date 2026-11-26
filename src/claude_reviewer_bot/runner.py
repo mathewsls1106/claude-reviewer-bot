@@ -1,6 +1,12 @@
-"""Una pasada del bot: buscar comentarios nuevos, procesarlos y guardar el estado."""
+"""Pasadas del bot (buscar comentarios nuevos, procesarlos, guardar el estado) y el bucle periódico."""
 
+import signal
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from types import FrameType
+from typing import Protocol
 
 from .config import Config
 from .github import GitHubClient
@@ -63,4 +69,65 @@ def run_once(cfg: Config, since: str | None = None, dry_run: bool = False) -> in
             log("otra ejecución está en curso; salgo")
             return 0
         run_cycle(store, CommentScanner(cfg, gh), service, since, dry_run)
+    return 0
+
+
+# ---------- modo periódico ----------
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+
+class Stopper(Protocol):
+    """Lo que ``watch`` necesita de ``threading.Event`` (permite simularlo en tests)."""
+
+    def is_set(self) -> bool: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
+
+
+def watch(tick: Callable[[], object], interval: float, stop: Stopper) -> int:
+    """Ejecuta ``tick`` y duerme ``interval`` s hasta que ``stop`` se active. Devuelve las pasadas hechas.
+
+    La espera es ``Event.wait``: el proceso queda bloqueado sin consumir CPU ni sondear.
+    """
+    cycles = 0
+    while not stop.is_set():
+        try:
+            tick()
+        except Exception as e:  # noqa: BLE001
+            log(f"la pasada falló, se reintenta en la siguiente: {e}")
+        cycles += 1
+        if stop.wait(interval):
+            break
+    return cycles
+
+
+def install_stop_signals(stop: threading.Event) -> None:
+    """SIGINT/SIGTERM piden parar: el bucle termina al acabar la pasada en curso."""
+
+    def handler(signum: int, frame: FrameType | None) -> None:
+        log(f"señal {signal.Signals(signum).name}: se detiene al terminar la pasada en curso")
+        stop.set()
+
+    for sig in STOP_SIGNALS:
+        signal.signal(sig, handler)
+
+
+@contextmanager
+def stop_signals(stop: threading.Event) -> Iterator[None]:
+    """Instala los manejadores de parada y restaura los anteriores al salir."""
+    previous = {sig: signal.getsignal(sig) for sig in STOP_SIGNALS}
+    install_stop_signals(stop)
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
+
+def run_forever(cfg: Config, interval: float, stop: threading.Event | None = None) -> int:
+    stop = stop or threading.Event()
+    log(f"modo periódico: una pasada cada {interval:g} s (Ctrl+C o SIGTERM para detener)")
+    with stop_signals(stop):
+        cycles = watch(lambda: run_once(cfg), interval, stop)
+    log(f"modo periódico detenido tras {cycles} pasada(s)")
     return 0
