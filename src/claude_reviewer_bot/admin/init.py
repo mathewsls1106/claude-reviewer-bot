@@ -78,7 +78,13 @@ def _resolve_repos(repos: Iterable[str], interactive: bool) -> dict[str, Path]:
 
 
 # ---------- comando ----------
-def _write_config(path, allowed_user, repos, state_dir, interactive) -> None:
+def _write_config(
+    path: Path,
+    allowed_user: str | None,
+    repos: Iterable[str],
+    state_dir: Path | None,
+    interactive: bool,
+) -> None:
     text = render_config(
         _resolve_user(allowed_user, interactive), _resolve_repos(repos, interactive), state_dir
     )

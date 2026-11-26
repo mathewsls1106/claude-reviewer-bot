@@ -1,6 +1,8 @@
 """Orquesta la revisión de un job: validar → preparar worktree → revisar → publicar."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from . import guards
 from .config import Config
@@ -26,7 +28,9 @@ class Review:
 
 
 class ReviewService:
-    def __init__(self, cfg: Config, gh: GitHubClient, reviewer: Reviewer, notifier: Notifier, dry_run=False):
+    def __init__(
+        self, cfg: Config, gh: GitHubClient, reviewer: Reviewer, notifier: Notifier, dry_run: bool = False
+    ) -> None:
         self.cfg = cfg
         self.gh = gh
         self.reviewer = reviewer
@@ -64,7 +68,7 @@ class ReviewService:
         return Review(pr, wrap(text, pr.head_sha))
 
     # ---------- internos ----------
-    def _publish(self, action, *args) -> None:
+    def _publish(self, action: Callable[..., object], *args: Any) -> None:
         """Ejecuta efectos visibles en GitHub salvo en dry-run."""
         if not self.dry_run:
             action(*args)

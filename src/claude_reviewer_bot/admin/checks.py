@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from shutil import which
 
 from ..config import Config, RepoConfig
@@ -127,7 +128,7 @@ def check_templates(cfg: Config) -> list[Check]:
     return [_check_template(p) for p in sorted(paths, key=str)]
 
 
-def _check_template(path) -> Check:
+def _check_template(path: Path | None) -> Check:
     label = str(path) if path else "incluida en el paquete"
     if path and not path.is_file():
         return Check("plantilla", Status.FAIL, f"no existe {path}", "Corrige 'template' en el config")

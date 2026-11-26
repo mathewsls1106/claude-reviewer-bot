@@ -2,9 +2,12 @@
 
 from dataclasses import asdict, dataclass
 from enum import Enum, StrEnum
+from typing import Any
 
 COMMAND = "/claude-review"
 MARKER = "<!-- claude-review -->"
+
+JsonDict = dict[str, Any]  # objeto JSON tal como lo devuelve la API de GitHub
 
 
 class CommentKind(StrEnum):
@@ -32,11 +35,11 @@ class Job:
     extra: str = ""
     attempts: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> JsonDict:
         return asdict(self) | {"kind": self.kind.value}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Job":
+    def from_dict(cls, d: JsonDict) -> "Job":
         return cls(**(d | {"kind": CommentKind(d["kind"])}))
 
 
@@ -52,7 +55,7 @@ class PullRequest:
     changed_files: int
 
     @classmethod
-    def from_api(cls, repo: str, d: dict) -> "PullRequest":
+    def from_api(cls, repo: str, d: JsonDict) -> "PullRequest":
         head_repo = d["head"]["repo"]
         return cls(
             repo=repo,

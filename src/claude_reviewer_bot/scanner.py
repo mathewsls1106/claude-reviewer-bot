@@ -4,7 +4,7 @@ import re
 
 from .config import Config
 from .github import GitHubClient
-from .models import COMMAND, MARKER, CommentKind, Job
+from .models import COMMAND, MARKER, CommentKind, Job, JsonDict
 
 # El comando solo cuenta al inicio de una línea (las citas con ">" quedan fuera).
 CMD_RE = re.compile(rf"^[ \t]*{re.escape(COMMAND)}\b[ \t]*(.*)$", re.M)
@@ -30,11 +30,11 @@ class CommentScanner:
             if (job := self._to_job(repo, kind, c, known))
         ]
 
-    def _is_allowed(self, comment: dict) -> bool:
-        login = (comment.get("user") or {}).get("login", "")
+    def _is_allowed(self, comment: JsonDict) -> bool:
+        login = str((comment.get("user") or {}).get("login", ""))
         return login.lower() == self.cfg.allowed_user.lower()
 
-    def _to_job(self, repo: str, kind: CommentKind, c: dict, known: set[str]) -> Job | None:
+    def _to_job(self, repo: str, kind: CommentKind, c: JsonDict, known: set[str]) -> Job | None:
         key = f"{repo}:{kind.value}:{c['id']}"
         body = c.get("body") or ""
         if key in known or MARKER in body or not self._is_allowed(c):

@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config/claude-review/config.toml"
 DEFAULT_STATE_DIR = Path.home() / ".local/state/claude-review"
@@ -45,7 +46,7 @@ def _path(value: str | None) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
-def _parse_repo(name: str, value: str | dict) -> RepoConfig:
+def _parse_repo(name: str, value: str | dict[str, Any]) -> RepoConfig:
     """Acepta ``"owner/repo" = "~/clon"`` o ``"owner/repo" = { path = "...", template = "..." }``."""
     if isinstance(value, str):
         return RepoConfig(name, Path(value).expanduser())
@@ -54,7 +55,7 @@ def _parse_repo(name: str, value: str | dict) -> RepoConfig:
     return RepoConfig(name, Path(value["path"]).expanduser(), _path(value.get("template")))
 
 
-def parse_config(raw: dict) -> Config:
+def parse_config(raw: dict[str, Any]) -> Config:
     for key in ("allowed_user", "repos"):
         if key not in raw:
             raise ConfigError(f"falta la clave obligatoria '{key}'")

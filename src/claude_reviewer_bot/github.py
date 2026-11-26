@@ -3,7 +3,7 @@
 import json
 from collections.abc import Iterator
 
-from .models import CommentKind, Job, PullRequest
+from .models import CommentKind, Job, JsonDict, PullRequest
 from .shell import CommandError, log, run
 
 GH_TIMEOUT = 90
@@ -13,7 +13,7 @@ class NotAPullRequest(Exception):
     """El número corresponde a un issue, no a un PR."""
 
 
-def iter_json_values(text: str) -> Iterator[dict]:
+def iter_json_values(text: str) -> Iterator[JsonDict]:
     """Recorre objetos JSON concatenados (salida de ``gh api --jq '.[]'``)."""
     dec, i = json.JSONDecoder(), 0
     while True:
@@ -29,7 +29,7 @@ class GitHubClient:
     def _gh(self, *args: str) -> str:
         return run(["gh", *args], timeout=GH_TIMEOUT)
 
-    def comments_since(self, repo: str, kind: CommentKind, since: str) -> Iterator[dict]:
+    def comments_since(self, repo: str, kind: CommentKind, since: str) -> Iterator[JsonDict]:
         path = f"repos/{repo}/{kind.api_path}/comments?since={since}&per_page=100"
         yield from iter_json_values(self._gh("api", "--paginate", path, "--jq", ".[]"))
 

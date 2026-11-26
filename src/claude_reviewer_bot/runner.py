@@ -30,7 +30,7 @@ def resolve_since(explicit: str | None, state: State, now: datetime) -> str:
 
 def run_cycle(
     store: StateStore, scanner: CommentScanner, service: ReviewService, since: str | None, dry_run: bool
-):
+) -> None:
     state = store.load()
     started = datetime.now(UTC)
     try:

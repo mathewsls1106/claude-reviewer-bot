@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -50,7 +51,7 @@ class StateStore:
         tmp.replace(self.file)  # escritura atómica
 
     @contextmanager
-    def exclusive(self):
+    def exclusive(self) -> Iterator[bool]:
         """Lock no bloqueante. Produce ``True`` si se obtuvo, ``False`` si otra instancia corre."""
         self.dir.mkdir(parents=True, exist_ok=True)
         with open(self.dir / "lock", "w") as fh:

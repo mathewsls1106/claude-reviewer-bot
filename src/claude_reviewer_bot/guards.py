@@ -4,7 +4,7 @@ Cada regla devuelve un motivo (str) para omitir o ``None`` si pasa.
 Agregar una regla = agregar una función a ``PR_RULES`` o ``DIFF_RULES``.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from .config import Config
 from .models import PullRequest
@@ -45,7 +45,7 @@ PR_RULES: tuple[PrRule, ...] = (is_open, not_from_fork, within_file_limit)
 DIFF_RULES: tuple[DiffRule, ...] = (within_diff_limit,)
 
 
-def enforce(rules, subject, cfg: Config) -> None:
+def enforce[T](rules: Iterable[Callable[[T, Config], str | None]], subject: T, cfg: Config) -> None:
     for rule in rules:
         if reason := rule(subject, cfg):
             raise Skip(reason)
