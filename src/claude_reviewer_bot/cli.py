@@ -1,6 +1,7 @@
 """CLI ``claude-review``.
 
-    claude-review [run] [--dry-run] [--since ISO]   una pasada (por defecto)
+    claude-review watch [--interval N]              modo de operación: una pasada cada N s
+    claude-review [run] [--dry-run] [--since ISO]   una pasada (por defecto; para probar con --dry-run)
     claude-review doctor                            diagnostica el entorno
     claude-review init [--repo o/r=RUTA ...]        crea config y estado inicial
 
@@ -12,11 +13,11 @@ import sys
 from pathlib import Path
 
 from .admin import doctor, init
-from .config import ConfigError, config_path, load_config
-from .runner import run_once
+from .config import MIN_POLL_INTERVAL, Config, ConfigError, config_path, load_config
+from .runner import run_forever, run_once
 from .shell import log
 
-COMMANDS = ("run", "doctor", "init")
+COMMANDS = ("watch", "run", "doctor", "init")
 HELP_FLAGS = ("-h", "--help")
 
 
@@ -42,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--since", help="ISO8601 UTC (ej. 2026-11-25T10:00:00Z) para forzar desde cuándo mirar")
 
+    watch = sub.add_parser("watch", parents=[common], help="proceso periódico: una pasada cada N segundos")
+    watch.add_argument(
+        "--interval", type=int, help="segundos entre pasadas (por defecto poll_interval_seconds del config)"
+    )
+
     sub.add_parser("doctor", parents=[common], help="diagnostica herramientas, sesiones, config y repos")
 
     ini = sub.add_parser("init", parents=[common], help="crea el config y el estado inicial")
@@ -56,13 +62,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 # ---------- comandos ----------
-def cmd_run(args: argparse.Namespace) -> int:
+def _load(path: Path | None) -> Config | None:
     try:
-        cfg = load_config(args.config)
+        return load_config(path)
     except ConfigError as e:
         log(f"configuración inválida: {e} (prueba `claude-review doctor`)")
+        return None
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    cfg = _load(args.config)
+    if cfg is None:
         return 2
     return run_once(cfg, args.since, args.dry_run)
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    cfg = _load(args.config)
+    if cfg is None:
+        return 2
+    interval: int = cfg.poll_interval_seconds if args.interval is None else args.interval
+    if interval < MIN_POLL_INTERVAL:
+        log(f"--interval debe ser al menos {MIN_POLL_INTERVAL} s")
+        return 2
+    return run_forever(cfg, interval)
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -79,7 +102,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     )
 
 
-HANDLERS = {"run": cmd_run, "doctor": cmd_doctor, "init": cmd_init}
+HANDLERS = {"watch": cmd_watch, "run": cmd_run, "doctor": cmd_doctor, "init": cmd_init}
 
 
 def main(argv: list[str] | None = None) -> int:

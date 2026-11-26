@@ -5,8 +5,13 @@ Guía para agentes de código (Claude Code, Codex, Gemini CLI, Cursor, etc.) que
 ## Qué es
 
 Bot local que revisa Pull Requests de GitHub con Claude Code. El usuario autorizado comenta
-`/claude-review [instrucción]` en un PR y luego **ejecuta el bot a mano** (`uv run claude-review`).
-El bot no se programa con cron, systemd ni GitHub Actions: es una decisión explícita, no lo agregues.
+`/claude-review [instrucción]` en un PR y el bot lo detecta solo: corre como **un único proceso
+de larga duración** (`uv run claude-review watch`) que hace una pasada cada `poll_interval_seconds`
+(300 s por defecto, mínimo 60). **El bot nunca se opera ejecutando pasadas a mano**: `run` real queda
+solo como pieza interna de `watch`; para probar se usa `run --dry-run` o los tests.
+La periodicidad vive dentro del proceso: no agregues cron, systemd timers ni GitHub Actions.
+Debe ser liviano: entre pasadas el proceso duerme en `threading.Event.wait` (cero CPU, sin hilos
+extra ni sondeo activo) y solo lanza `claude` cuando hay un `/claude-review` nuevo.
 Código, comentarios, mensajes y logs están en español.
 
 ## Comandos
@@ -22,16 +27,20 @@ uv run mypy                               # tipado estricto (configurado sobre s
 uv run claude-review doctor               # diagnóstico del entorno (solo lee)
 uv run claude-review init --repo o/r=RUTA # crea config + estado inicial
 uv run claude-review --dry-run --since 2026-11-25T10:00:00Z   # revisa sin publicar ni guardar estado
-uv run claude-review                      # una pasada real (publica en GitHub)
+uv run claude-review watch [--interval N] # modo de operación: pasada cada N s (publica en GitHub)
 ```
 
 Config: `~/.config/claude-review/config.toml` (o `--config` / `CLAUDE_REVIEW_CONFIG`). Estado y lock en
-`~/.local/state/claude-review/`. `run` sin `--dry-run` publica comentarios reales en repos de la org:
+`~/.local/state/claude-review/`. `watch` y `run` sin `--dry-run` publican comentarios reales en repos de la org:
 no lo ejecutes para probar; usa `--dry-run` o los tests.
 
 ## Arquitectura (flujo de una pasada)
 
-`cli.py` (subcomandos `run` por defecto, `doctor`, `init`; sin subcomando se antepone `run`) →
+`cli.py` (subcomandos `watch`, `run` por defecto, `doctor`, `init`; sin subcomando se antepone `run`).
+`watch` → `runner.run_forever` instala SIGINT/SIGTERM sobre un `threading.Event` y `runner.watch` repite
+`run_once(cfg)` (sin `since` ni `dry_run`) esperando `interval` entre pasadas; una pasada que falla se
+registra y el bucle sigue; la señal detiene el bucle al terminar la pasada en curso. `watch` no acepta
+`--dry-run` ni `--since`. Cada pasada:
 `runner.run_once` toma el lock de `StateStore` → `resolve_since` (`--since` > `last_check − 2 min` > ahora) →
 `CommentScanner` lista comentarios de issues y de review vía `GitHubClient` y crea `Job`s →
 `ReviewService.process(job)` por cada job (pendientes primero) → se guarda el estado.
