@@ -4,10 +4,36 @@ from dataclasses import asdict, dataclass
 from enum import Enum, StrEnum
 from typing import Any
 
-COMMAND = "/claude-review"
 MARKER = "<!-- claude-review -->"
 
 JsonDict = dict[str, Any]  # objeto JSON tal como lo devuelve la API de GitHub
+
+
+class Mode(StrEnum):
+    """Qué produce el bot para un comando: revisión de código o resumen del PR."""
+
+    REVIEW = "review"  # /claude-review
+    SUMMARY = "summary"  # /claude-summary
+
+    @property
+    def command(self) -> str:
+        return f"/claude-{self.value}"
+
+    @property
+    def template(self) -> str:
+        return f"{self.value}.md"
+
+    @property
+    def heading(self) -> str:
+        return "Revisión automática de Claude" if self is Mode.REVIEW else "Resumen del PR (Claude)"
+
+    @property
+    def noun(self) -> str:
+        return "la revisión" if self is Mode.REVIEW else "el resumen"
+
+
+COMMAND = Mode.REVIEW.command
+COMMANDS = tuple(m.command for m in Mode)
 
 
 class CommentKind(StrEnum):
@@ -34,13 +60,16 @@ class Job:
     n: int
     extra: str = ""
     attempts: int = 0
+    mode: Mode = Mode.REVIEW
 
     def to_dict(self) -> JsonDict:
-        return asdict(self) | {"kind": self.kind.value}
+        return asdict(self) | {"kind": self.kind.value, "mode": self.mode.value}
 
     @classmethod
     def from_dict(cls, d: JsonDict) -> "Job":
-        return cls(**(d | {"kind": CommentKind(d["kind"])}))
+        # Estados guardados antes de existir `mode` solo tenían revisiones.
+        mode = Mode(d.get("mode", Mode.REVIEW.value))
+        return cls(**(d | {"kind": CommentKind(d["kind"]), "mode": mode}))
 
 
 @dataclass(frozen=True)

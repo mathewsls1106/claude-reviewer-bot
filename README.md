@@ -1,8 +1,14 @@
 <img width="1810" height="904" alt="Gemini_Generated_Image_ieib15ieib15ieib(1)" src="https://github.com/user-attachments/assets/9e8a2b70-aeac-4737-b647-0d1c1047bf98" />
 
 
-Revisa Pull Requests de GitHub con Claude Code cuando el usuario autorizado comenta
-`/claude-review [instrucción opcional]` en el PR. Corre como un proceso periódico liviano (`watch`).
+Revisa Pull Requests de GitHub con Claude Code cuando el usuario autorizado comenta en el PR:
+
+| Comando | Qué publica |
+|---|---|
+| `/claude-review [instrucción]` | Revisión de código: resumen breve, posibles bugs, mejoras, tests faltantes |
+| `/claude-summary [instrucción]` | Resumen para quien va a revisar: qué hace el PR, cambios por área, puntos críticos a mirar (`archivo:línea`) y coherencia con la tarea descrita en el PR (cumplido/parcial/falta, fallas de lógica) |
+
+Corre como un proceso periódico liviano (`watch`).
 
 ## Requisitos
 - Python ≥ 3.12 y [uv](https://docs.astral.sh/uv/)
@@ -26,17 +32,20 @@ uv run claude-review watch --interval 120
 
 El bot no se opera a mano: se deja corriendo `claude-review watch`, que hace una pasada cada
 `poll_interval_seconds` (300 s por defecto, mínimo 60, o `--interval N`). Basta comentar
-`/claude-review` en el PR y la revisión llega en la siguiente pasada. Entre pasadas el proceso duerme
+`/claude-review` o `/claude-summary` en el PR y la respuesta llega en la siguiente pasada. Entre pasadas el proceso duerme
 sin consumir CPU y solo lanza `claude` cuando hay un comando nuevo. Ctrl+C o SIGTERM lo detienen al
 terminar la pasada en curso. `run` (una sola pasada) queda para probar con `--dry-run`.
 
-## Plantilla del prompt
-La plantilla es un Markdown en `src/claude_reviewer_bot/templates/review.md`, con frontmatter
-estilo `SKILL.md` (se ignora al construir el prompt). Variables: `$repo $number $title $extra
-$max_words $body $diff $command`. Las llaves `{}` y el código dentro del Markdown no molestan.
+## Plantillas del prompt
+Son Markdown en `src/claude_reviewer_bot/templates/`: `review.md` (`/claude-review`) y `summary.md`
+(`/claude-summary`), con frontmatter estilo `SKILL.md` (se ignora al construir el prompt).
+Variables: `$repo $number $title $extra $max_words $body $diff $command`. Las llaves `{}` y el
+código dentro del Markdown no molestan.
 
-Para personalizar: copia la plantilla y apunta a ella en el config con `template = "..."` (global)
-o `"org/repo" = { path = "...", template = "..." }` (por repo).
+Para personalizar la revisión: copia `review.md` y apunta a ella en el config con
+`template = "..."` (global) o `"org/repo" = { path = "...", template = "..." }` (por repo).
+El resumen usa siempre `summary.md` y toma como "tarea" la descripción del PR: si el PR no tiene
+descripción, lo indica y se limita a la coherencia interna del cambio.
 
 Además, como Claude corre dentro del worktree del PR, lee automáticamente el `CLAUDE.md` del repo
 revisado: las convenciones propias de cada proyecto se aplican sin tocar el bot.
@@ -52,7 +61,7 @@ revisado: las convenciones propias de cada proyecto se aplican sin tocar el bot.
 | `config.py` | carga y validación del TOML (dataclasses inmutables) |
 | `state.py` | `StateStore` (Repository): JSON atómico + lock |
 | `github.py` | `GitHubClient` (Facade sobre `gh`) |
-| `scanner.py` | detecta comentarios `/claude-review` → `Job` |
+| `scanner.py` | detecta comentarios `/claude-review` y `/claude-summary` → `Job` (con su `Mode`) |
 | `guards.py` | reglas de validación del PR (cadena de validadores) |
 | `prompt.py` + `templates/` | construye el prompt desde la plantilla Markdown |
 | `workspace.py` | worktree temporal (context manager) |
