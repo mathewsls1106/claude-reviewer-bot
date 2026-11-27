@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Protocol
 
-from .models import COMMAND
+from .models import COMMANDS
 from .shell import run
 
 READ_ONLY_TOOLS = "Read,Grep,Glob"
@@ -30,5 +30,7 @@ class ClaudeCliReviewer:
         out = run(self._command(), input=prompt, cwd=cwd, timeout=self.timeout, env=env).strip()
         if not out:
             raise RuntimeError("claude devolvió una respuesta vacía")
-        # Evita que el bot se dispare a sí mismo.
-        return out.replace(COMMAND, f"`{COMMAND.lstrip('/')}`")
+        # Evita que el bot se dispare a sí mismo con cualquiera de sus comandos.
+        for command in COMMANDS:
+            out = out.replace(command, f"`{command.lstrip('/')}`")
+        return out

@@ -1,19 +1,21 @@
-"""Detecta comentarios ``/claude-review`` nuevos y los convierte en :class:`Job`."""
+"""Detecta comentarios ``/claude-review`` y ``/claude-summary`` nuevos y los convierte en :class:`Job`."""
 
 import re
 
 from .config import Config
 from .github import GitHubClient
-from .models import COMMAND, MARKER, CommentKind, Job, JsonDict
+from .models import COMMANDS, MARKER, CommentKind, Job, JsonDict, Mode
 
 # El comando solo cuenta al inicio de una línea (las citas con ">" quedan fuera).
-CMD_RE = re.compile(rf"^[ \t]*{re.escape(COMMAND)}\b[ \t]*(.*)$", re.M)
+_ALTERNATIVES = "|".join(re.escape(c) for c in COMMANDS)
+CMD_RE = re.compile(rf"^[ \t]*({_ALTERNATIVES})\b[ \t]*(.*)$", re.M)
+_MODE_BY_COMMAND = {m.command: m for m in Mode}
 
 
-def parse_command(body: str) -> str | None:
-    """Devuelve la instrucción extra (posiblemente vacía) o ``None`` si no hay comando."""
+def parse_command(body: str) -> tuple[Mode, str] | None:
+    """Devuelve ``(modo, instrucción extra)`` del primer comando o ``None`` si no hay ninguno."""
     m = CMD_RE.search(body)
-    return m.group(1).strip() if m else None
+    return (_MODE_BY_COMMAND[m.group(1)], m.group(2).strip()) if m else None
 
 
 class CommentScanner:
@@ -39,8 +41,9 @@ class CommentScanner:
         body = c.get("body") or ""
         if key in known or MARKER in body or not self._is_allowed(c):
             return None
-        extra = parse_command(body)
-        if extra is None:
+        parsed = parse_command(body)
+        if parsed is None:
             return None
+        mode, extra = parsed
         n = int(c[kind.url_field].rsplit("/", 1)[1])
-        return Job(key=key, repo=repo, kind=kind, cid=c["id"], n=n, extra=extra)
+        return Job(key=key, repo=repo, kind=kind, cid=c["id"], n=n, extra=extra, mode=mode)

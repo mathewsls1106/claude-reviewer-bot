@@ -2,13 +2,14 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from string import Template
 from typing import Any
 
 from . import guards
 from .config import Config
 from .github import GitHubClient, NotAPullRequest
 from .guards import Skip
-from .models import MARKER, Job, Outcome, PullRequest
+from .models import MARKER, Job, Mode, Outcome, PullRequest
 from .notifier import Notifier
 from .prompt import build_prompt, load_template
 from .reviewer import Reviewer
@@ -16,9 +17,9 @@ from .shell import log
 from .workspace import pr_worktree
 
 
-def wrap(body: str, sha: str | None = None) -> str:
+def wrap(body: str, sha: str | None = None, heading: str = Mode.REVIEW.heading) -> str:
     foot = f"\n\n---\n<sub>Commit revisado: `{sha[:7]}`</sub>" if sha else ""
-    return f"{MARKER}\n### 🤖 Revisión automática de Claude\n\n{body}{foot}"
+    return f"{MARKER}\n### 🤖 {heading}\n\n{body}{foot}"
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,8 @@ class ReviewService:
             return Outcome.DONE
         except Skip as s:
             log(f"omitido: {s}")
-            self._publish(self.gh.comment, job.repo, job.n, wrap(f"⚠️ No se hizo la revisión: {s}"))
+            msg = f"⚠️ No se hizo {job.mode.noun}: {s}"
+            self._publish(self.gh.comment, job.repo, job.n, wrap(msg, heading=job.mode.heading))
             return Outcome.DONE
         except Exception as e:  # noqa: BLE001 - cualquier fallo es reintentable
             return self._on_failure(job, e)
@@ -60,14 +62,19 @@ class ReviewService:
         diff = self.gh.diff(pr)
         guards.enforce(guards.DIFF_RULES, diff, self.cfg)
 
-        template = load_template(self.cfg.template_for(job.repo))
-        prompt = build_prompt(template, pr, diff, job.extra, self.cfg.max_words)
+        template = self._template(job)
+        prompt = build_prompt(template, pr, diff, job.extra, self.cfg.max_words, job.mode.command)
         clone = self.cfg.repos[job.repo].clone_path
         with pr_worktree(clone, pr.number, pr.head_sha, self.cfg.state_dir / "worktrees") as wt:
             text = self.reviewer.review(prompt, wt)
-        return Review(pr, wrap(text, pr.head_sha))
+        return Review(pr, wrap(text, pr.head_sha, job.mode.heading))
 
     # ---------- internos ----------
+    def _template(self, job: Job) -> Template:
+        """La plantilla configurada (global o por repo) aplica solo a revisiones."""
+        override = self.cfg.template_for(job.repo) if job.mode is Mode.REVIEW else None
+        return load_template(override, job.mode.template)
+
     def _publish(self, action: Callable[..., object], *args: Any) -> None:
         """Ejecuta efectos visibles en GitHub salvo en dry-run."""
         if not self.dry_run:
@@ -78,8 +85,9 @@ class ReviewService:
         log(f"error: {err}")
         if job.attempts < self.cfg.max_attempts:
             return Outcome.RETRY
-        msg = f"❌ La revisión falló {job.attempts} veces. Último error: `{str(err)[:300]}`"
-        self._publish(self.gh.comment, job.repo, job.n, wrap(msg))
+        noun = job.mode.noun.capitalize()
+        msg = f"❌ {noun} falló {job.attempts} veces. Último error: `{str(err)[:300]}`"
+        self._publish(self.gh.comment, job.repo, job.n, wrap(msg, heading=job.mode.heading))
         return Outcome.DONE  # se descarta tras agotar reintentos
 
     def _deliver(self, job: Job, review: Review) -> Outcome:
@@ -87,5 +95,6 @@ class ReviewService:
             print(f"\n{'=' * 70}\n{review.comment}\n{'=' * 70}")
             return Outcome.DRY
         self.gh.comment(job.repo, job.n, review.comment)
-        self.notifier.notify("Revisión de PR lista", f"{job.repo}#{job.n}: {review.pr.title}")
+        title = "Revisión de PR lista" if job.mode is Mode.REVIEW else "Resumen de PR listo"
+        self.notifier.notify(title, f"{job.repo}#{job.n}: {review.pr.title}")
         return Outcome.DONE

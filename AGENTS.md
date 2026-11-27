@@ -5,13 +5,15 @@ Guía para agentes de código (Claude Code, Codex, Gemini CLI, Cursor, etc.) que
 ## Qué es
 
 Bot local que revisa Pull Requests de GitHub con Claude Code. El usuario autorizado comenta
-`/claude-review [instrucción]` en un PR y el bot lo detecta solo: corre como **un único proceso
+`/claude-review [instrucción]` (revisión de código) o `/claude-summary [instrucción]` (resumen para
+quien revisa: qué se hizo, puntos críticos y coherencia con la tarea) en un PR y el bot lo detecta
+solo: corre como **un único proceso
 de larga duración** (`uv run claude-review watch`) que hace una pasada cada `poll_interval_seconds`
 (300 s por defecto, mínimo 60). **El bot nunca se opera ejecutando pasadas a mano**: `run` real queda
 solo como pieza interna de `watch`; para probar se usa `run --dry-run` o los tests.
 La periodicidad vive dentro del proceso: no agregues cron, systemd timers ni GitHub Actions.
 Debe ser liviano: entre pasadas el proceso duerme en `threading.Event.wait` (cero CPU, sin hilos
-extra ni sondeo activo) y solo lanza `claude` cuando hay un `/claude-review` nuevo.
+extra ni sondeo activo) y solo lanza `claude` cuando hay un comando nuevo.
 Código, comentarios, mensajes y logs están en español.
 
 ## Comandos
@@ -58,17 +60,23 @@ Semántica de resultados (`models.Outcome`), clave para no romper reintentos:
 
 Invariantes que atraviesan varios archivos:
 - Clave de job: `"{repo}:{kind}:{comment_id}"` (`kind` = `i` issue / `r` review), usada para deduplicar
-  contra `state.done` (se recortan a los últimos 1000) y `state.pending`.
+  contra `state.done` (se recortan a los últimos 1000) y `state.pending`. Un comentario = un job.
+- Modos (`models.Mode`): `REVIEW` (`/claude-review`) y `SUMMARY` (`/claude-summary`); cada uno define
+  comando, plantilla empaquetada, encabezado del comentario y sustantivo de los mensajes. `Job.mode`
+  se persiste; un estado sin `mode` se carga como `REVIEW`. Si un comentario trae ambos, gana la
+  primera línea.
 - Anti-auto-disparo: todo comentario del bot empieza con `MARKER` (`<!-- claude-review -->`), el scanner
-  ignora comentarios con el marcador y el reviewer reemplaza `/claude-review` en la salida de Claude.
+  ignora comentarios con el marcador y el reviewer reemplaza todos los `models.COMMANDS` en la salida
+  de Claude.
 - El comando solo cuenta al inicio de línea (`scanner.CMD_RE`); citas con `>` no disparan.
 - Seguridad: PRs desde forks se omiten; `GH_TOKEN`/`GITHUB_TOKEN` se quitan del entorno de Claude;
   Claude solo tiene herramientas de lectura; el contenido del PR va en `<pr_content>` como no confiable.
 
-Plantilla del prompt: `src/claude_reviewer_bot/templates/review.md`, Markdown con frontmatter tipo
-`SKILL.md` (se elimina al construir) y variables `string.Template` (`$repo $number $title $extra
-$max_words $body $diff $command`). Se puede sobrescribir global (`template`) o por repo
-(`"o/r" = { path, template }`). Claude además lee el `CLAUDE.md` del repo revisado porque corre en su worktree.
+Plantillas del prompt: `src/claude_reviewer_bot/templates/{review,summary}.md`, Markdown con
+frontmatter tipo `SKILL.md` (se elimina al construir) y variables `string.Template` (`$repo $number
+$title $extra $max_words $body $diff $command`; `$command` es el comando del modo). Solo la de revisión
+se puede sobrescribir global (`template`) o por repo (`"o/r" = { path, template }`); el resumen usa
+siempre `summary.md`, cuya "tarea" es la descripción del PR. Claude además lee el `CLAUDE.md` del repo revisado porque corre en su worktree.
 
 `admin/`: `checks.py` son verificaciones que devuelven `Check(name, status, detail, hint)`; `doctor.py`
 las agrega y sale con 1 si hay algún `FAIL`; `init.py` escribe el TOML y fija `last_check` sin

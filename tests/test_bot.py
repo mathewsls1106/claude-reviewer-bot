@@ -1,11 +1,14 @@
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from claude_reviewer_bot import guards
+from claude_reviewer_bot import reviewer as reviewer_mod
+from claude_reviewer_bot import service as service_mod
 from claude_reviewer_bot.config import ConfigError, parse_config
 from claude_reviewer_bot.github import NotAPullRequest, iter_json_values
-from claude_reviewer_bot.models import MARKER, CommentKind, Job, Outcome, PullRequest
+from claude_reviewer_bot.models import MARKER, CommentKind, Job, Mode, Outcome, PullRequest
 from claude_reviewer_bot.notifier import NullNotifier
 from claude_reviewer_bot.prompt import build_prompt, load_template
 from claude_reviewer_bot.scanner import CommentScanner, parse_command
@@ -59,11 +62,23 @@ def test_config_invalid(raw):
 
 
 # ---------- parsing ----------
-def test_parse_command():
-    assert parse_command("hola\n/claude-review revisa seguridad") == "revisa seguridad"
-    assert parse_command("/claude-review") == ""
-    assert parse_command("> /claude-review citado") is None
-    assert parse_command("texto /claude-review en medio") is None
+@pytest.mark.parametrize(
+    "body, expected",
+    [
+        ("hola\n/claude-review revisa seguridad", (Mode.REVIEW, "revisa seguridad")),
+        ("/claude-review", (Mode.REVIEW, "")),
+        ("/claude-summary", (Mode.SUMMARY, "")),
+        ("  /claude-summary foco en pagos", (Mode.SUMMARY, "foco en pagos")),
+        ("/claude-summary x\n/claude-review y", (Mode.SUMMARY, "x")),  # gana la primera línea
+        ("> /claude-review citado", None),
+        ("> /claude-summary citado", None),
+        ("texto /claude-summary en medio", None),
+        ("/claude-reviewx", None),
+        ("/claude-summaryx", None),
+    ],
+)
+def test_parse_command(body, expected):
+    assert parse_command(body) == expected
 
 
 def test_iter_json_values():
@@ -119,6 +134,28 @@ def test_scanner_filters():
     assert [(j.cid, j.n, j.extra) for j in jobs] == [(1, 7, "foco en tests")]
 
 
+def issue_comment(i, login, body):
+    return {"id": i, "user": {"login": login}, "body": body, "issue_url": "https://x/issues/7"}
+
+
+def test_scanner_summary_mode():
+    gh = FakeGH(
+        {
+            CommentKind.ISSUE: [
+                issue_comment(1, "alice", "/claude-summary foco en pagos"),
+                issue_comment(2, "alice", f"{MARKER}\n/claude-summary"),  # del propio bot
+                issue_comment(3, "bob", "/claude-summary"),  # usuario no autorizado
+                issue_comment(4, "alice", "/claude-review"),
+            ]
+        }
+    )
+    jobs = CommentScanner(make_cfg(), gh).scan("since", known=set())
+    assert [(j.cid, j.mode, j.extra) for j in jobs] == [
+        (1, Mode.SUMMARY, "foco en pagos"),
+        (4, Mode.REVIEW, ""),
+    ]
+
+
 # ---------- guards ----------
 @pytest.mark.parametrize(
     "pr",
@@ -152,6 +189,15 @@ def test_default_template_has_no_leftover_vars():
     assert "$" not in out and "---" not in out.splitlines()[0]
 
 
+def test_summary_template_has_no_leftover_vars():
+    tpl = load_template(name="summary.md")
+    out = build_prompt(tpl, make_pr(), "diff", "extra", 10, command=Mode.SUMMARY.command)
+    assert "$" not in out and "---" not in out.splitlines()[0]
+    for section in ("Qué hace este PR", "Puntos críticos", "Coherencia con la tarea"):
+        assert section in out
+    assert "/claude-summary" in out  # llega vía $command
+
+
 # ---------- state ----------
 def test_state_roundtrip(tmp_path):
     from datetime import UTC, datetime
@@ -165,6 +211,22 @@ def test_state_roundtrip(tmp_path):
         assert ok
         with store.exclusive() as ok2:
             assert not ok2
+
+
+def test_job_from_dict_without_mode_is_review():
+    # estado guardado antes de esta versión: pendientes sin "mode"
+    legacy = {"key": "k", "repo": "o/r", "kind": "i", "cid": 1, "n": 2, "extra": "", "attempts": 0}
+    assert Job.from_dict(legacy).mode is Mode.REVIEW
+
+
+def test_job_roundtrip_keeps_mode(tmp_path):
+    from datetime import UTC, datetime
+
+    store = StateStore(tmp_path)
+    job = Job("k", "o/r", CommentKind.ISSUE, 1, 2, mode=Mode.SUMMARY)
+    assert job.to_dict()["mode"] == "summary"
+    store.save(State(datetime(2026, 1, 1, tzinfo=UTC), [], [job]))
+    assert store.load().pending == [job]
 
 
 # ---------- service ----------
@@ -191,3 +253,76 @@ def test_service_skip_and_not_pr():
     gh = FakeGH(pr=None)
     assert ReviewService(make_cfg(), gh, None, NullNotifier()).process(job) is Outcome.DONE
     assert gh.posted == []
+
+
+class CapturingReviewer:
+    def __init__(self, out="texto de Claude"):
+        self.out, self.prompts = out, []
+
+    def review(self, prompt, cwd):
+        self.prompts.append(prompt)
+        return self.out
+
+
+@contextmanager
+def fake_worktree(clone, n, sha, root):
+    yield Path("/wt")
+
+
+def cfg_with_repo_template(tmp_path):
+    tpl = tmp_path / "custom.md"
+    tpl.write_text("PLANTILLA PROPIA $diff")
+    return parse_config(
+        {"allowed_user": "Alice", "repos": {"o/r": {"path": "/tmp/clone", "template": str(tpl)}}}
+    )
+
+
+def test_service_summary_uses_summary_template(tmp_path, monkeypatch):
+    monkeypatch.setattr(service_mod, "pr_worktree", fake_worktree)
+    gh, rv = FakeGH(pr=make_pr()), CapturingReviewer()
+    job = Job("k", "o/r", CommentKind.ISSUE, 1, 2, mode=Mode.SUMMARY)
+
+    svc = ReviewService(cfg_with_repo_template(tmp_path), gh, rv, NullNotifier())
+    assert svc.process(job) is Outcome.DONE
+
+    # la plantilla propia del repo es solo para /claude-review
+    assert "PLANTILLA PROPIA" not in rv.prompts[0]
+    assert "Puntos críticos" in rv.prompts[0]
+    posted = gh.posted[-1]
+    assert posted.startswith(MARKER)
+    assert "Resumen del PR (Claude)" in posted and "texto de Claude" in posted
+    assert "abcdef1" in posted  # commit revisado
+
+
+def test_service_review_mode_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(service_mod, "pr_worktree", fake_worktree)
+    gh, rv = FakeGH(pr=make_pr(), diff="D"), CapturingReviewer()
+    job = Job("k", "o/r", CommentKind.ISSUE, 1, 2)  # mode por defecto: REVIEW
+
+    ReviewService(cfg_with_repo_template(tmp_path), gh, rv, NullNotifier()).process(job)
+    assert rv.prompts[0] == "PLANTILLA PROPIA D"
+    assert "Revisión automática de Claude" in gh.posted[-1]
+
+
+def test_service_skip_summary_message():
+    job = Job("k", "o/r", CommentKind.ISSUE, 1, 2, mode=Mode.SUMMARY)
+    gh = FakeGH(pr=make_pr(state="closed"))
+    assert ReviewService(make_cfg(), gh, None, NullNotifier()).process(job) is Outcome.DONE
+    assert "No se hizo el resumen" in gh.posted[0]
+    assert "Resumen del PR (Claude)" in gh.posted[0]
+
+
+def test_service_summary_dry_run_publishes_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(service_mod, "pr_worktree", fake_worktree)
+    gh = FakeGH(pr=make_pr())
+    job = Job("k", "o/r", CommentKind.ISSUE, 1, 2, mode=Mode.SUMMARY)
+    svc = ReviewService(make_cfg(), gh, CapturingReviewer(), NullNotifier(), dry_run=True)
+    assert svc.process(job) is Outcome.DRY
+    assert gh.posted == [] and "Resumen del PR (Claude)" in capsys.readouterr().out
+
+
+# ---------- reviewer ----------
+def test_reviewer_neutralizes_all_commands(monkeypatch):
+    monkeypatch.setattr(reviewer_mod, "run", lambda *a, **k: "usa /claude-review o /claude-summary")
+    out = reviewer_mod.ClaudeCliReviewer().review("prompt", Path("."))
+    assert "/claude-review" not in out and "/claude-summary" not in out
