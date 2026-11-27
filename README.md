@@ -1,4 +1,4 @@
-# claude-reviewer-bot
+<img width="2048" height="2048" alt="Gemini_Generated_Image_ieib15ieib15ieib" src="https://github.com/user-attachments/assets/6a62d422-7125-416c-b958-fb3959adb2b6" />
 
 Revisa Pull Requests de GitHub con Claude Code cuando el usuario autorizado comenta
 `/claude-review [instrucción opcional]` en el PR. Corre como un proceso periódico liviano (`watch`).
